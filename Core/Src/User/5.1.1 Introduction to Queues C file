@@ -1,0 +1,160 @@
+/*
+ * main_user.c
+ *
+ *  Created on: Aug 8, 2022
+ *      Author: Andre Hendricks
+ * 
+ * This file contains the main user code for the project.
+ *  Lab 3: FreeRTOS Queues
+ * Description: This lab demonstrates the use of FreeRTOS queues. The main task will
+ * periodically print a message to the console. The main task will also increment a
+ * counter. The main task will send the counter value to the receiver task using a queue.
+ * The receiver task will receive the counter value and print it to the console.
+ * 
+ */
+
+#include <stdio.h>
+
+// STM32 generated header files
+#include "main.h"
+
+// User generated header files
+#include "User/main_user.h"
+#include "User/util.h"
+
+// Required FreeRTOS header files
+#include "FreeRTOS.h"
+#include "task.h"
+
+// This library allows the use of FreeRTOS queues
+#include "queue.h"
+
+// Global Variables
+QueueHandle_t xQueue;        // Queue handle
+char receiver_string[50];    // String to hold received data
+char main_string[50];        // String to hold main task data
+uint32_t main_counter = 0;   // Counter for main task
+
+/*****************************************************
+ * vSenderTask
+ * 
+ * This task periodically sends a value to the queue.
+ * The value to send is provided as a task parameter.
+ *****************************************************/
+static void vSenderTask(void *pvParameters) 
+{
+    int32_t lValueToSend;   // Value to send to the queue
+    BaseType_t xStatus;     // Status of queue operation
+
+    // Assign the value to send from task parameter
+    lValueToSend = (int32_t)pvParameters;
+
+    for(;;) 
+    {
+        // Send value to the back of the queue
+        xStatus = xQueueSendToBack(xQueue, &lValueToSend, 0);
+        
+        // Check if the value was successfully sent
+        if (xStatus != pdPASS) 
+        {
+            print_str("Could not send to the queue.\r\n");
+        }
+
+        // Delay for 50ms before sending the next value
+        vTaskDelay(50);
+    }
+}
+
+/***************************************************************
+ * vReceiverTask
+ * 
+ * This task receives data from the queue and prints it to the
+ * console. It waits for a maximum of 100ms for data from the
+ * queue.
+ ***************************************************************/
+static void vReceiverTask(void *pvParameters) 
+{
+    int32_t lReceivedValue;             // Value received from the queue
+    BaseType_t xStatus;                 // Status of queue operation
+    const TickType_t xTicksToWait = pdMS_TO_TICKS(100); // Max wait time for queue data
+
+    for(;;) 
+    {
+        // Check if the queue has messages waiting
+        if (uxQueueMessagesWaiting(xQueue) != 0) 
+        {
+            print_str("Queue is not empty!\r\n");
+        }
+
+        // Attempt to receive data from the queue
+        xStatus = xQueueReceive(xQueue, &lReceivedValue, xTicksToWait);
+        
+        // Check if data was successfully received
+        if (xStatus == pdPASS) 
+        {
+            // Print the received value
+            sprintf(receiver_string, "Received = %ld\r\n", lReceivedValue);
+            print_str(receiver_string);
+        } 
+        else 
+        {
+            // No data received from the queue
+            print_str("Could not receive from the queue.\r\n");
+        }
+    }
+}
+
+/***************************************************************
+ * main_task
+ * 
+ * This task periodically prints a message to the console and 
+ * increments a counter. It runs continuously.
+ ***************************************************************/
+static void main_task(void *param) 
+{
+    while(1) 
+    {
+        // Print a message indicating that the main task is executing
+        print_str("Main task loop executing\r\n");
+
+        // Increment and print the main counter value
+        sprintf(main_string, "Main task iteration: 0x%08lx\r\n", main_counter++);
+        print_str(main_string);
+
+        // Delay for 1 second before the next iteration
+        vTaskDelay(1000 / portTICK_RATE_MS);
+    }
+}
+
+/***************************************************************
+ * main_user
+ * 
+ * This function initializes the system and creates the required
+ * tasks (sender, receiver, and main task). It also starts the
+ * FreeRTOS scheduler.
+ ***************************************************************/
+void main_user() 
+{
+    // Initialize system utilities
+    util_init();
+
+    // Create the queue with space for 5 int32_t values
+    xQueue = xQueueCreate(5, sizeof(int32_t));
+
+    // Check if the queue was created successfully
+    if (xQueue != NULL) 
+    {
+        // Create two sender tasks with different values (100 and 200)
+        xTaskCreate(vSenderTask, "Sender1", 1000, (void *)100, 1, NULL);
+        xTaskCreate(vSenderTask, "Sender2", 1000, (void *)200, 1, NULL);
+
+        // Create the receiver task
+        xTaskCreate(vReceiverTask, "Receiver", 1000, NULL, 2, NULL);
+
+        // Start the scheduler to begin task execution
+        vTaskStartScheduler();
+    }
+
+    // Infinite loop to prevent exiting the main function
+    while(1);
+}
